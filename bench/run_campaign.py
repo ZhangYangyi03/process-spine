@@ -34,7 +34,7 @@ def run_one(space, codes, y, arm, seed, budget, batch, init):
     c = Campaign(space, codes, y, batch=batch, acq=arm, seed=seed, init=init)
     t0 = time.time()
     tr = c.run(budget=budget, arm=arm)
-    ceil = float(np.nanmax(c.y_grid))
+    ceil = c.ceiling
     return {
         "arm": arm, "seed": seed, "budget": budget,
         "seconds": round(time.time() - t0, 2),
@@ -60,13 +60,13 @@ def main():
     c0 = Campaign(space, codes, y)
     PROG("loaded %s | cells %d/%d (%.1f%%) | max %.1f mean %.2f | zeros %d" % (
         space, c0.n_cells, space.size, 100 * c0.coverage,
-        np.nanmax(c0.y_grid), np.nanmean(c0.y_grid), int((y == 0).sum())))
+        c0.ceiling, float(c0.cell_y.mean()), int((y == 0).sum())))
 
     arms = ["random", "ofat", "fill"] + [a.strip() for a in args.acqs.split(",") if a.strip()]
     out = {
         "dataset": meta, "space": str(space), "grid_size": space.size,
         "cells_present": c0.n_cells, "coverage": c0.coverage,
-        "ceiling": float(np.nanmax(c0.y_grid)), "ceiling_note":
+        "ceiling": c0.ceiling, "ceiling_note":
             "max cell mean in the finished table; the line no campaign can cross",
         "budget": args.budget, "batch": args.batch, "init": args.init,
         "seeds": args.seeds, "runs": [],
