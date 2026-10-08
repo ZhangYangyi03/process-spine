@@ -30,4 +30,10 @@ Source = "https://github.com/ZhangYangyi03/process-spine"
 packages = ["pspine"]
 
 [tool.setuptools.package-data]
-pspine = ["_datasets/buchwald/*.csv", "_datasets/buchwald/*.txt"]
+pspine = [
+  "_datasets/*.md",
+  "_datasets/buchwald/*.csv", "_datasets/buchwald/*.txt",
+  "_datasets/ccpp/*.csv",
+  "_datasets/gasturbine/*.csv",
+  "_datasets/concrete/*.csv",
+]

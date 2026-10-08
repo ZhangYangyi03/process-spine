@@ -1,48 +1,81 @@
-"""A surrogate that survives a table of named levels.
+"""A surrogate that survives a table of named levels *and* a table of settings.
 
-A one-hot linear model cannot see that two ligands are similar, and a
-kernel on raw integer codes invents an order that the labels do not have.
-Both are wrong in a way that shows up as *confident* nonsense in a small
-campaign. The compromise used here is the standard one for categorical BO:
+Two kinds of factor, two kinds of distance, and the difference is not cosmetic:
 
-  kernel  =  sum_f  k_f(a_f, b_f)
-  k_f     =  exp(-||onehot(a_f) - onehot(b_f)||^2 / (2 l_f^2))
+  named level (ligand A/B/C)   a one-hot linear model cannot see that two
+                              ligands are similar, and a kernel on raw integer
+                              codes invents an order the labels do not have.
+                              Both are wrong in a way that shows up as
+                              *confident* nonsense in a small campaign. So a
+                              named factor contributes 1 when the level matches
+                              and exp(-1/l^2) when it does not -- one half of the
+                              squared one-hot distance, which is 2 on a mismatch.
 
-i.e. each factor contributes 1 when its level matches and exp(-1/(2 l_f^2))
-when it does not, and a per-factor length scale is learned. A factor whose
-length scale collapses is a factor the data says does not matter -- which is
-the same statement contact-sid makes about a joint that cannot excite anything.
+  continuous setting (24 C)    binning it into levels throws away the metric,
+                              which is the wrong move on the continuous process
+                              tables: a power plant's output moves smoothly in
+                              ambient temperature, and a binner destroys the
+                              gradient the surrogate needs. So a continuous
+                              factor contributes the squared exponential on its
+                              scaled coordinate.
+
+  kernel(a,b) = signal * exp( - sum_f d2_f(a_f, b_f) / l_f^2 )
+
+A per-factor length scale is fitted by marginal likelihood. A factor whose
+length scale collapses is a factor the data says does not matter -- the same
+statement contact-sid makes about a joint that cannot excite anything.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
 
-def _rbf_from_codes(codes: np.ndarray, cardinality, ls: np.ndarray) -> np.ndarray:
-    """Squared-distance matrix in one-hot space, summed over factors."""
-    n = codes.shape[0]
-    d2 = np.zeros((n, n))
-    for j, card in enumerate(cardinality):
-        a = codes[:, j][:, None]
-        b = codes[:, j][None, :]
-        neq = (a != b).astype(float)          # 0 when the level matches
-        d2 += neq * 2.0                       # ||e_a - e_b||^2 = 2 when a != b
-    return d2
+def weighted_sq_dist(A, B, continuous, spacing, ls):
+    """sum_f d2_f / l_f^2 -- (n_A, n_B).
+
+    A continuous factor's coordinate is first divided by its own span (spacing
+    carries 1/(n-1) per grid step), so its length scale is in *fractions of the
+    range* and means the same thing on a factor measured in Celsius as on one
+    measured in kg/m^3. Without that, the same length scale would be
+    "irrelevant" for a 1-1000 range and "very relevant" for a 0-1 range, and the
+    factor ranking the model reports would be an artefact of units.
+    """
+    A = np.asarray(A, dtype=float).reshape(len(A), -1)
+    B = np.asarray(B, dtype=float).reshape(len(B), -1)
+    ls = np.asarray(ls, dtype=float)
+    out = np.zeros((A.shape[0], B.shape[0]))
+    for j, cont in enumerate(continuous):
+        a = A[:, j][:, None]
+        b = B[:, j][None, :]
+        if cont:
+            # half the squared gap, so the kernel is the usual exp(-d^2/l^2) with
+            # the RBF's factor of 2 absorbed into the length scale
+            d2 = 0.5 * ((a - b) * spacing[j]) ** 2
+        else:
+            # one-hot distance squared is 2 for a mismatch, so /2 leaves 1 --
+            # exactly the "same -> 1, different -> exp(-1/l^2)" rule the module
+            # docstring states. Using 2 here would make the docstring a lie and
+            # the length-scale grid mean something else than what it says.
+            d2 = (a != b).astype(float)
+        out += d2 / (ls[j] ** 2)
+    return out
 
 
 @dataclass
 class MixedGP:
-    """Zero-mean GP on a finite categorical space.
+    """Zero-mean GP over a finite space of named levels and/or real settings.
 
-    Hyperparameters (per-factor length scale, signal, noise) are fitted by
-    maximising the marginal likelihood with a coarse multi-start; the space is
-    small enough that a grid over length scales is cheaper than gradients and
-    has no chance of returning a worse optimum than its own multi-start.
+    Hyperparameters are fitted by maximising the marginal likelihood with a
+    coarse multi-start: the candidate space is small enough that a grid over
+    length scales is cheaper than gradients and cannot return a worse optimum
+    than its own multi-start.
     """
     cardinality: tuple
+    continuous: tuple = None
+    spacing: tuple = None
     ls: np.ndarray = None
     signal: float = 1.0
     noise: float = 1e-2
@@ -52,28 +85,39 @@ class MixedGP:
 
     def __post_init__(self):
         self.cardinality = tuple(self.cardinality)
+        d = len(self.cardinality)
+        self.continuous = ((False,) * d if self.continuous is None
+                           else tuple(bool(x) for x in self.continuous))
+        if len(self.continuous) != d:
+            raise ValueError("continuous flags must match the factor count")
+        if self.spacing is None:
+            self.spacing = tuple(0.0 if not c else 1.0 / (n - 1)
+                                 for c, n in zip(self.continuous, self.cardinality))
+        else:
+            self.spacing = tuple(float(x) for x in self.spacing)
+            if len(self.spacing) != d:
+                raise ValueError("spacing must match the factor count")
         if self.ls is None:
-            self.ls = np.full(len(self.cardinality), 0.7)
+            self.ls = np.full(d, 0.7)
         else:
             self.ls = np.asarray(self.ls, dtype=float)
-        # fitted state
         self.X_ = None
         self.y_ = None
         self.K_inv_ = None
         self.alpha_ = None
 
+    @classmethod
+    def for_space(cls, space, **kw):
+        """A surrogate whose factor kinds match a DesignSpace's."""
+        return cls(cardinality=space.cardinality,
+                   continuous=tuple(f.continuous for f in space.factors),
+                   spacing=space.spacing, **kw)
+
     # ---- kernel ----------------------------------------------------------
     def _K(self, A, B, ls=None, signal=None):
-        """Additive kernel over factors: k(a,b) = signal * exp(-sum_j d2_j/(2 l_j^2))."""
         ls = self.ls if ls is None else ls
         signal = self.signal if signal is None else signal
-        A = np.asarray(A, dtype=int).reshape(len(A), -1)
-        B = np.asarray(B, dtype=int).reshape(len(B), -1)
-        acc = np.zeros((A.shape[0], B.shape[0]))
-        for j in range(len(self.cardinality)):
-            d2j = (A[:, j][:, None] != B[:, j][None, :]).astype(float) * 2.0
-            acc += d2j / (2.0 * ls[j] ** 2)
-        return signal * np.exp(-acc)
+        return signal * np.exp(-weighted_sq_dist(A, B, self.continuous, self.spacing, ls))
 
     # ---- marginal likelihood --------------------------------------------
     def _nll(self, X, y, ls, signal, noise):
@@ -83,15 +127,37 @@ class MixedGP:
         except np.linalg.LinAlgError:
             return np.inf
         a = np.linalg.solve(L.T, np.linalg.solve(L, y))
-        nll = 0.5 * y @ a + np.log(np.diag(L)).sum() + 0.5 * len(X) * math.log(2 * math.pi)
-        return float(nll)
+        return float(0.5 * y @ a + np.log(np.diag(L)).sum() + 0.5 * len(X) * math.log(2 * math.pi))
+
+    def _ls_candidates(self):
+        """Every factor at one grid value, plus a per-factor move away from the
+        default. A full grid over 10 factors would be 5^10; this stays linear in
+        the factor count and still lets one irrelevant factor collapse alone."""
+        g = self.ls_grid
+        d = len(self.cardinality)
+        base = np.full(d, 0.7)
+        cands = [base]
+        for v in g:
+            cands.append(np.full(d, v))
+        for j in range(d):
+            for v in g:
+                c = base.copy(); c[j] = v; cands.append(c)
+        seen, out = set(), []
+        for c in cands:
+            k = tuple(np.round(c, 6))
+            if k not in seen:
+                seen.add(k); out.append(c)
+        return out
 
     def fit(self, X, y, signal_range=(0.5, 1.0, 2.0), noise_range=(1e-2, 5e-2, 2e-1)):
-        X = np.asarray(X, dtype=int)
+        X = np.asarray(X, dtype=float)
         y = np.asarray(y, dtype=float)
         if X.ndim == 1:
             X = X.reshape(-1, 1)
         if len(X) > self.max_fit:
+            # A random subset, because the marginal likelihood of 4599 rows is a
+            # 4599^2 matrix and this process lives under a hard commit ceiling.
+            # Declared, not hidden: the fit sees at most `max_fit` cells.
             rng = np.random.default_rng(0)
             keep = rng.choice(len(X), self.max_fit, replace=False)
             X, y = X[keep], y[keep]
@@ -104,7 +170,7 @@ class MixedGP:
                     v = self._nll(X, yc, np.asarray(ls), signal, noise)
                     if v < best[0]:
                         best = (v, (np.asarray(ls, dtype=float), float(signal), float(noise)))
-        if best[1] is None:                    # numerically hopeless: fall back
+        if best[1] is None:
             best = (np.inf, (np.full(len(self.cardinality), 0.7), 1.0, 1e-2))
         self.ls, self.signal, self.noise = best[1]
         K = self._K(X, X) + (self.noise + 1e-9) * np.eye(len(X))
@@ -113,36 +179,12 @@ class MixedGP:
         self.alpha_ = self.K_inv_ @ yc
         return self
 
-    def _ls_candidates(self):
-        """Every factor at one of the grid values, plus per-factor one-at-a-time
-        moves from the current setting. Full grid over 4 factors would be 5^4=625
-        per (signal, noise) pair; this keeps the fit cheap and still lets a
-        single irrelevant factor collapse on its own."""
-        g = self.ls_grid
-        base = np.full(len(self.cardinality), 0.7)
-        cands = [base]
-        for v in g:
-            cands.append(np.full(len(self.cardinality), v))
-        for j in range(len(self.cardinality)):
-            for v in g:
-                c = base.copy(); c[j] = v; cands.append(c)
-        seen, out = set(), []
-        for c in cands:
-            k = tuple(np.round(c, 6))
-            if k not in seen:
-                seen.add(k); out.append(c)
-        return out
-
     # ---- prediction ------------------------------------------------------
     def predict(self, Xs, return_std=True, chunk=192):
-        """Prediction in row chunks.
-
-        Not a micro-optimisation: this process runs under a hard commit ceiling
-        of a few hundred MB, so a single (n_candidates x n_fit) kernel over a
-        few thousand candidates is the difference between running and not
-        running. Chunking changes no number, only the peak allocation.
-        """
-        Xs = np.asarray(Xs, dtype=int)
+        """Prediction in row chunks, which changes no number, only the peak
+        allocation: a single (n_candidates x n_fit) kernel over a few thousand
+        candidates is the difference between running and not running here."""
+        Xs = np.asarray(Xs, dtype=float)
         if Xs.ndim == 1:
             Xs = Xs.reshape(-1, 1)
         if self.X_ is None:
@@ -161,13 +203,41 @@ class MixedGP:
             return m
         return m, np.sqrt(np.clip(np.concatenate(vs), 1e-12, None))
 
+    # ---- conditioning (for batch acquisition) ----------------------------
+    def conditioned(self, Xnew, ynew):
+        """A copy of this GP with `Xnew` added as observed, hyperparameters held.
+
+        This is what a batch acquisition needs: q-EI scores a *set*, which means
+        re-asking "what is the posterior mean and width here" after pretending
+        the already-chosen points have been measured. Re-running the
+        hyperparameter search for every candidate pick would cost 45 marginal
+        likelihoods per pick; the block inverse below costs one small solve.
+        Held hyperparameters are also the honest choice -- the surrogate has seen
+        no new data, only a hypothesis about it.
+        """
+        import copy as _copy
+        g = _copy.copy(self)
+        Xnew = np.asarray(Xnew, dtype=float)
+        Xnew = Xnew.reshape(1, -1) if Xnew.ndim == 1 else Xnew
+        ynew = np.atleast_1d(np.asarray(ynew, dtype=float)) - self.mu
+        B = self._K(Xnew, self.X_)                          # (m, n)
+        D = self._K(Xnew, Xnew) + (self.noise + 1e-9) * np.eye(len(Xnew))
+        Ainv = self.K_inv_
+        S = D - B @ Ainv @ B.T
+        S = S + 1e-10 * np.eye(len(Xnew))
+        Sinv = np.linalg.inv(S)
+        AinvB = Ainv @ B.T
+        top = Ainv + AinvB @ Sinv @ AinvB.T
+        g.K_inv_ = np.block([[top, -AinvB @ Sinv], [-Sinv @ AinvB.T, Sinv]])
+        g.X_ = np.vstack([self.X_, Xnew])
+        g.y_ = np.concatenate([self.y_, ynew])
+        g.alpha_ = g.K_inv_ @ g.y_
+        return g
+
     # ---- interpretation --------------------------------------------------
     def factor_scale(self) -> dict:
-        """How much each factor is allowed to matter, after the fit."""
         return {j: float(v) for j, v in enumerate(self.ls)}
 
     def effective_factors(self, atol=0.05):
-        """Factors whose length scale did NOT collapse to the smallest grid
-        value -- i.e. the data still gives them room to matter."""
         lo = min(self.ls_grid)
         return [j for j, v in enumerate(self.ls) if v > lo + atol]

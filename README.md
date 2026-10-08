@@ -48,18 +48,26 @@ heuristic in the small-sample regime this domain lives in.
     python -m pip install -e .
     python -m pspine.bench          # or: python bench/run_campaign.py
 
-    arm     best_frac  std    worst   q90_hit  q90_mean  s/run
-    random      0.939  0.061   83.29     0.80      24.0    0.0
-    ofat        0.978  0.026   92.96     1.00      24.0    0.0
-    fill        0.902  0.049   86.76     0.40       8.0    1.9
-    ei          0.976  0.033   91.39     1.00      25.6    0.8
-    logei       0.923  0.097   76.11     0.60      13.3    0.4
-    ucb         0.976  0.033   91.39     1.00      24.0    0.5
-    pi          0.976  0.033   91.39     1.00      27.2    0.5
+    python -m pspine bench        # one table
+    python bench/run_multitable.py   # all four, 8 arms x 5 seeds
 
-`best_frac` is best-found over the table's maximum. `q90_hit` is the fraction of
-seeds that ever found 90% of the ceiling within the budget; `q90_mean` is the
-experiments that took.
+    best-so-far over the table's own best, budget 64, batch 8, 5 seeds
+
+    table        cells  random   fill     ofat     ei       qei      ucb      pi       logei
+    buchwald      4599  0.9394   0.9435   0.9785   0.9760   0.9896   0.9760   0.9760   0.9232
+    ccpp          4368  0.9795   0.9942   0.9880   1.0000   1.0000   0.9968   0.9994   1.0000
+    concrete       268  0.9754   0.9593   0.9550   1.0000   1.0000   1.0000   1.0000   1.0000
+    gasturbine    3381  0.9510   0.9776   0.9583   0.9953   0.9886   0.9954   0.9953   0.9953
+
+    best Bayesian arm minus one-factor-at-a-time
+
+    buchwald     +0.0111      (batch EI; greedy EI ties at -0.0025)
+    ccpp         +0.0120
+    concrete     +0.0450
+    gasturbine   +0.0371
+
+`qei` is batch EI by sequential conditioning (Kriging Believer), not the greedy
+top-k an `ei` run uses in a batch. `fill` is greedy max-min.
 
 ## Why this exists, and what it is not
 
@@ -96,15 +104,43 @@ a time). That is not a micro-optimisation: the process that produced these
 numbers runs under a hard heap ceiling of a couple of MB, so a full 4599x4599
 matrix is not merely slow, it is impossible. Peak allocation is a few hundred KB.
 
-## Fuel
+## Fuel: four measured tables, no simulator anywhere
 
-    pspine/_datasets/buchwald/data_table.csv   4599 rows, 1.2 MB, SHA-256 pinned
-    source: doylelab/rxnpredict, MIT, (c) 2017 Ahneman, Estrada, Lin, Dreher, Doyle
+    table        rows    cells/grid        factors                     target
+    buchwald     4599    4599/4608         4 named (base, ligand, aryl   yield %
+                                            halide, additive)          (562 exact zeros,
+                                                                       a censored floor)
+    ccpp         9568    4368/65536        4 continuous (ambient temp,    net hourly
+                                            exhaust vacuum, ambient       output (MW)
+                                            pressure, humidity)
+    gasturbine  36733    3381/390625       8 continuous (turbine inlet   NOx (ppm)
+                                            temp, compressor discharge
+                                            pressure, air filter dP, ...)
+    concrete     1030     268/65536        8 continuous (cement, slag,    compressive
+                                            fly ash, water, ...) +age    strength (MPa)
 
-Columns: `base`, `ligand`, `aryl_halide`, `additive` -> `yield` (%). 564 rows are
-an exact zero, and a zero here is "no product detected" -- a censored reading,
-not a measurement of 0.0. It is kept as a row because it cost a real experiment,
-and that censoring is the most likely reason log-scaled EI misbehaves.
+    buchwald   doylelab/rxnpredict, MIT, 4599 of 4608 cells of the Science 2018 amination study
+    ccpp       UCI 294, 9568 hourly records from a combined-cycle plant, 2006-2011
+    gasturbine UCI 551, 36733 records from a gas turbine, 2011-2015
+    concrete   UCI 165, 1030 concrete mix designs (Yeh, 2007)
+
+All four are SHA-256 pinned and verified on load; a mismatch raises rather than
+proceeding. `coverage` -- the fraction of the design space the table contains --
+is reported for each, because 99.8% and 0.4% are not the same problem and the
+code should not pretend they are.
+
+A note on what the continuous tables cost and what they buy. A measured setting
+is quantised onto an n-level grid across its [q01, q99] range, a row snaps to
+its nearest grid point, and `meta["snap_max_frac_of_range"]` reports the
+worst-case error (half a grid step, as a fraction of the range). That is a real
+simplification, stated as a number rather than an impression. What it buys is
+the thing binning destroys: the surrogate sees 24 C sitting near 25 C and far
+from 35 C, because the numbers say so.
+
+A candidate is a *row of the table*, not a point of the design grid. On the
+turbine table the grid is 390625 cells and the plant has measured 3381 of them;
+scoring the whole grid would be scoring settings nobody has ever run, which is
+the mistake this package exists not to make.
 
 ## Related, by the same author
 

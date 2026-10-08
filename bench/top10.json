@@ -1,0 +1,122 @@
+{
+ "seeds": 5,
+ "budget": 64,
+ "tables": {
+  "ccpp": {
+   "table": "ccpp",
+   "rows": 9568,
+   "metric": [
+    {
+     "n_train": 16,
+     "spearman_mean": 0.9384005932403253,
+     "spearman_std": 0.00771439799830109,
+     "top10_mean": 0.0,
+     "mae_mean": 4.772909122632655,
+     "hypothesis": "continuous kernel (metric kept)"
+    },
+    {
+     "n_train": 32,
+     "spearman_mean": 0.9346095530401055,
+     "spearman_std": 0.026942613936667244,
+     "top10_mean": 0.0,
+     "mae_mean": 4.651173442378791,
+     "hypothesis": "continuous kernel (metric kept)"
+    },
+    {
+     "n_train": 64,
+     "spearman_mean": 0.9252233580986575,
+     "spearman_std": 0.02268687745085654,
+     "top10_mean": 0.08,
+     "mae_mean": 4.839003487989798,
+     "hypothesis": "continuous kernel (metric kept)"
+    },
+    {
+     "n_train": 128,
+     "spearman_mean": 0.933225086164116,
+     "spearman_std": 0.0033472302660914935,
+     "top10_mean": 0.08,
+     "mae_mean": 4.600233237004567,
+     "hypothesis": "continuous kernel (metric kept)"
+    },
+    {
+     "n_train": 256,
+     "spearman_mean": 0.9448269579237971,
+     "spearman_std": 0.0021471342614545817,
+     "top10_mean": 0.2,
+     "mae_mean": 4.0999258248511685,
+     "hypothesis": "continuous kernel (metric kept)"
+    }
+   ],
+   "binned": [
+    {
+     "n_train": 16,
+     "spearman_mean": 0.5854389176373835,
+     "top10_mean": 0.0,
+     "hypothesis": "same factors rank-binned to 5 levels"
+    },
+    {
+     "n_train": 32,
+     "spearman_mean": 0.5853987430331902,
+     "top10_mean": 0.0,
+     "hypothesis": "same factors rank-binned to 5 levels"
+    },
+    {
+     "n_train": 64,
+     "spearman_mean": 0.5856581823451841,
+     "top10_mean": 0.0,
+     "hypothesis": "same factors rank-binned to 5 levels"
+    },
+    {
+     "n_train": 128,
+     "spearman_mean": 0.5863518132235399,
+     "top10_mean": 0.02,
+     "hypothesis": "same factors rank-binned to 5 levels"
+    },
+    {
+     "n_train": 256,
+     "spearman_mean": 0.5861907895053065,
+     "top10_mean": 0.0,
+     "hypothesis": "same factors rank-binned to 5 levels"
+    }
+   ],
+   "k": 10
+  },
+  "concrete": {
+   "table": "concrete",
+   "rows": 1030,
+   "metric": [
+    {
+     "n_train": 32,
+     "spearman_mean": 0.4312869863489659,
+     "spearman_std": 0.04347216486721696,
+     "top10_mean": 0.0,
+     "mae_mean": 12.604032872093791,
+     "hypothesis": "continuous kernel (metric kept)"
+    },
+    {
+     "n_train": 128,
+     "spearman_mean": 0.6014387051320238,
+     "spearman_std": 0.04831622125174337,
+     "top10_mean": 0.26666666666666666,
+     "mae_mean": 10.884364594219496,
+     "hypothesis": "continuous kernel (metric kept)"
+    }
+   ],
+   "binned": [
+    {
+     "n_train": 32,
+     "spearman_mean": -0.006178533272842251,
+     "top10_mean": 0.0,
+     "hypothesis": "same factors rank-binned to 5 levels"
+    },
+    {
+     "n_train": 128,
+     "spearman_mean": -0.012122527340697358,
+     "top10_mean": 0.0,
+     "hypothesis": "same factors rank-binned to 5 levels"
+    }
+   ],
+   "k": 10
+  }
+ }
+}

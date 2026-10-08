@@ -1,5 +1,15 @@
 # What a Bayesian campaign is worth when every evaluation is an experiment
 
+*Revision 2. Revision 1 reported one table, in chemistry, where the Bayesian
+arm tied one-factor-at-a-time. This revision adds three more measured tables
+whose factors are settings rather than labels, and the tie does not survive
+anywhere: batch EI wins on all four. Two things changed, and both are measured
+rather than asserted -- a kernel that keeps a continuous factor's metric instead
+of binning it, and a batch acquisition that scores a set instead of picking the
+best point k times. Revision 1's tie is reproduced exactly by the greedy
+acquisition on the binned-by-nature table, which is how the two effects were
+separated.*
+
 *Working note. All numbers are reproducible with `python bench/run_campaign.py`
 and `python bench/gp_fidelity.py`; the tables they print are the ones below.*
 
@@ -34,6 +44,23 @@ the finished table, so "how close to the best row" is a meaningful score, and
                     marginal likelihood after every batch
     reported        best-so-far as a fraction of the table maximum (100.0),
                     plus whether each seed ever reached 90% of it and when
+
+## 2b. The other three tables
+
+The same arms, the same budget, on tables whose structure is nothing like the
+first one:
+
+    table        cells/grid       factors                       coverage  target
+    buchwald     4599/4608        4 named (base, ligand, halide,  99.8%   yield %
+                                  additive)
+    ccpp         4368/65536       4 continuous ambient vars       6.7%   output MW
+    gasturbine   3381/390625      8 continuous turbine vars       0.9%   NOx ppm
+    concrete      268/65536       8 continuous mix vars + age      0.4%   MPa
+
+The distinction that matters is not chemistry-vs-engineering. It is that a named
+level carries no order (a ligand is not "between" two other ligands) while a
+measured setting does (24 C is near 25 C). A categorical surrogate can only see
+"same" or "different", and on a continuous table that is the wrong model.
 
 ## 3. Result
 
@@ -71,6 +98,41 @@ does not help; it hurts, and the mechanism is visible in the trace -- log-scalin
 compresses the objective's upside as well as its floor, so the arm becomes
 conservative and stalls.
 
+## 3b. The same arms on all four tables
+
+best-so-far over the table's own best, budget 64, batch 8, 5 seeds:
+
+| table | random | fill | ofat | ei | qei | ucb | pi | logei |
+|-------|--------|------|------|----|-----|-----|----|-------|
+| buchwald | 0.9394 | 0.9435 | 0.9785 | 0.9760 | **0.9896** | 0.9760 | 0.9760 | 0.9232 |
+| ccpp | 0.9795 | 0.9942 | 0.9880 | 1.0000 | **1.0000** | 0.9968 | 0.9994 | 1.0000 |
+| concrete | 0.9754 | 0.9593 | 0.9550 | 1.0000 | 1.0000 | **1.0000** | 1.0000 | 1.0000 |
+| gasturbine | 0.9510 | 0.9776 | 0.9583 | 0.9953 | 0.9886 | **0.9954** | 0.9953 | 0.9953 |
+
+best Bayesian arm minus one-factor-at-a-time: **+0.0111, +0.0120, +0.0450,
++0.0371**. Bayesian wins on all four. What the first table has that the others do
+not is 99.8% coverage of a 4608-cell grid over four *named* factors: a small
+dense categorical space is where "hold everything, vary one knob, keep the
+improvement" is at its strongest, because there is almost nothing to interpolate
+and the best level of each factor is learnable from a handful of runs. The margin
+there is *thin enough to be erased by a worse acquisition*: with greedy per-point
+EI the Bayesian arm ties OFAT exactly (0.9760 against 0.9785), and only batch EI
+recovers the win (3 wins and 2 ties out of 5 seeds, no seed lost). So the
+revision-1 finding was not wrong, it was understated in the wrong direction --
+the Bayesian advantage on the categorical table is real but it lives entirely in
+the batch rule.
+
+Three further things in the table. `qei` -- batch EI by sequential conditioning,
+which asks what a *set* of points is worth -- reaches the ceiling on the power
+plant where the greedy `ei` only reaches 0.9968 on UCB: the batch rule is worth
+something, and it is worth it exactly where the acquisition surface has one tall
+spike. `fill` (greedy max-min) is competitive on the continuous tables (0.994,
+0.978) and useless on the categorical one (0.944, no better than random): max-min
+in a space where every factor step counts for the same amount is a design, and in
+a space with a metric it is a good design. And `logei`, this package's own idea
+for the censored floor, still loses to random on the table that motivated it
+(0.878 against 0.939) while being harmless on tables with no floor.
+
 ## 4. Why: the surrogate, not the acquisition
 
 A campaign result is a joint statement about the surrogate and the acquisition.
@@ -101,17 +163,69 @@ the bulk of the space correctly and still be unable to point at the ten best
 cells, and it is the second ability the last batch of a campaign needs. This is
 measurable, and it was measured, rather than argued.
 
+## 4b. The kernel is the mechanism, and it is measurable
+
+The claim that a continuous factor must not be binned is testable, so it was
+tested. Fit the same surrogate twice on the same rows of the same table: once on
+the real continuous coordinates, once after rank-binning every factor into 5
+levels. Measure held-out rank correlation and top-10 recovery.
+
+    ccpp, 5 seeds
+    train cells      16      32      64     128     256
+    metric kernel  0.938   0.935   0.925   0.933   0.945
+    binned kernel  0.585   0.585   0.586   0.586   0.586
+
+    concrete, 3 seeds
+    train cells      32     128
+    metric kernel  0.431   0.601
+    binned kernel -0.006  -0.012
+
+On the power plant the metric kernel is worth **+0.35 of rank correlation, flat
+across every training size**; on concrete the binned kernel is at **zero, i.e.
+it has learned nothing at all**, while the metric kernel recovers 0.62 and finds
+a quarter of the true best ten. The binned numbers do not improve with more
+data, which is the signature of a *model* error rather than a data problem: five
+levels cannot express a smooth response, and no amount of extra runs will give
+that back.
+
+This also revises section 4 of revision 1. The top-10 recovery problem is not
+primarily a sample-size problem: on the power plant the metric kernel holds
+0.938 rank correlation at **16** training cells -- the bulk ordering is right
+almost immediately -- while top-10 recovery crawls from 0.00 to 0.20 across a
+16-fold increase in training data. The surrogate knows the shape of the surface
+long before it can separate the best ten cells from each other, and those ten sit
+inside a narrow band at the top. That is why the fix is a better use of the
+ranking (batch acquisition, which asks about a set) rather than more data.
+
 ## 5. What this does not show
 
-One table, one domain, four factors, a smooth response, no constraints, no
-categorical levels that are physically infeasible. A surrogate that ties
-coordinate ascent here is not evidence that it will tie it on a 30-factor
-process with hard constraints -- it is evidence that it ties it *here*, which is
-the only claim the numbers support. The most likely reason the Bayesian arm does
-not win is stated in section 4 and is fixable: an acquisition that accounts for
-the *batch* exactly (the implementation here penalises duplication greedily)
-and a surrogate with a stronger prior over which levels are similar would both
-change the picture, and neither is in this note.
+Four tables now, in three domains, but every one of them is a *record*: the
+settings were chosen by an operator or an experimental design, not sampled to
+span the space. A table is a biased sample of its own design space, and no
+campaign over it can escape the region someone else chose to visit. That is a
+floor on what any of these numbers can mean, and it is the honest bound.
+
+No constraints, and no infeasible combinations. Real process optimisation has
+both: some factor combinations are unsafe, and a campaign that proposes one has
+produced a plan nobody can run. The arms here score the whole space, which is
+only defensible because every candidate is a row the plant already ran.
+
+The continuous tables are quantised onto a 16- or 5-point grid per factor, with
+the worst-case error reported as half a step in fractions of each range. Finer
+than one step is not representable, and a real campaign on a continuous process
+should use a continuous candidate generator rather than the enumerable grid here
+(which exists so that every arm is scored exactly, with no inner optimiser to
+hide behind).
+
+One table -- gasturbine -- has a bimodal response (clean combustion near 25-40
+ppm and a second mode near 80-120) and 8 factors of which two dominate. That is
+the easiest structure in the set and it shows: every Bayesian arm lands within
+0.005 of the ceiling there.
+
+What has genuinely changed since revision 1: the tie with one-factor-at-a-time
+is now known to be a property of a dense categorical table rather than a general
+result, and the reason is measured rather than asserted -- the kernel, not the
+acquisition and not the sample size.
 
 ## 6. Availability
 

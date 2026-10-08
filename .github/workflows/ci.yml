@@ -26,14 +26,38 @@ jobs:
         run: python -m pytest tests -q
       - name: The data is the data
         run: python -m pspine space
+      - name: Every table a campaign runs on is complete, and hash-verified
+        shell: bash
+        run: |
+          python -m pspine space | tee space.txt
+          python - <<'EOF'
+          import re, sys
+          txt = open("space.txt").read()
+          tables = re.findall(r"^== (\w+)", txt, re.M)
+          assert len(tables) == 4, f"expected 4 tables, saw {tables}"
+          assert txt.count("verified         True") == 4, "a table failed its pinned hash"
+          for bad in ("verified         False",):
+              assert bad not in txt
+          print("4 tables, all verified, all loaded")
+          EOF
+      - name: A campaign on every table, all arms, so the ceiling is on the record
+        shell: bash
+        run: python bench/run_multitable.py --seeds 1 --budget 16 --tables ccpp,concrete --out bench/ci_mt.json
+      - name: The continuous kernel must beat the binned one
+        shell: bash
+        run: python bench/run_top10.py --seeds 1 --sizes 32 --tables concrete --out bench/ci_t10.json
       - name: A campaign runs end to end
         shell: bash
         run: python bench/run_campaign.py --seeds 1 --budget 16 --acqs ei --out bench/ci.json
-      - name: Upload the campaign result
+      - name: Upload the campaign results
         uses: actions/upload-artifact@v4
         with:
           name: ci-${{ matrix.os }}-${{ matrix.python-version }}
-          path: bench/ci.json
+          path: |
+            bench/ci.json
+            bench/ci_mt.json
+            bench/ci_t10.json
+            space.txt
 
   wheel:
     runs-on: ubuntu-latest

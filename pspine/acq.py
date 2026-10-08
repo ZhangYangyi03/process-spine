@@ -58,18 +58,41 @@ def logei(mu, sd, best, xi=0.0):
     return (lm - lb - xi) * norm.cdf(z) + sd_log * norm.pdf(z)
 
 
-def q_ei(mu, sd, best, xi=0.01, rho=0.85, n_mc=64, rng=None):
-    """A cheap q-EI for the batch case: Kriging Believer.
+def q_ei_batch(gp, cand_codes, batch, best, xi=0.01, pessimism=1.0, chunk=192):
+    """q-EI by sequential conditioning -- the Kriging Believer idea.
 
-    Not the exact batch EI -- it is the standard approximation that conditions
-    the surrogate on a *hallucinated* observation at each chosen point with
-    correlation rho, then re-ranks. Chosen over a Monte-Carlo q-EI because the
-    number of candidates here is in the thousands and the batch is small; the
-    difference in points chosen is measurable, and the cost difference is not.
+    Greedy top-k of a single EI pass answers the wrong question: it scores each
+    candidate against the *current* posterior and then picks several points that
+    are all high for the same reason. Batch EI asks what a *set* is worth, and
+    the standard cheap approximation is to assume each pick returns its own
+    posterior mean, fold that hallucinated measurement back into the posterior,
+    and re-score. The second pick then sees the first pick's uncertainty already
+    spent, which is exactly the information a greedy top-k throws away.
+
+    `pessimism` scales the hallucinated value: 1.0 is the posterior mean (plain
+    Kriging Believer), and values below 1.0 make the liar pessimistic, which
+    spreads a batch harder across the uncertainty. Returned as candidate
+    indices, ordered by the pick sequence.
     """
     if norm is None:
         raise RuntimeError("qEI needs scipy.stats.norm")
-    raise NotImplementedError("used through acq.greedy_batch instead")
+    cand = np.asarray(cand_codes, dtype=float)
+    alive = np.ones(len(cand), bool)
+    picks = []
+    g = gp
+    for _ in range(min(batch, len(cand))):
+        if not alive.any():
+            break
+        idx = np.flatnonzero(alive)
+        mu, sd = g.predict(cand[idx], chunk=chunk)
+        vals = ei(mu, sd, best, xi=xi)
+        j = int(np.argmax(vals))
+        pick = int(idx[j])
+        picks.append(pick)
+        alive[pick] = False
+        g = g.conditioned(cand[pick][None, :],
+                          np.array([mu[j] - pessimism * sd[j]]))
+    return picks
 
 
 FUNCS = {"ei": ei, "logei": logei, "pi": pi, "ucb": ucb}

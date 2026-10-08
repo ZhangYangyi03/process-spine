@@ -22,24 +22,39 @@ def random_arm(mask, batch, rng):
 
 
 def fill_arm(codes_grid, mask, batch):
-    """Greedy max-min: pick the point furthest (in one-hot L1) from everything
-    already chosen. Deterministic, so two runs of this arm agree."""
-    chosen = codes_grid[~mask]
-    idx = list(np.flatnonzero(mask))
-    if not idx:
+    """Greedy max-min in code space: pick the cell furthest from everything
+    chosen so far. Deterministic.
+
+    Vectorised, because the naive form is O(n_candidates x n_chosen) *per pick*
+    in pure Python and that is minutes per seed on a 4000-cell table -- the arm
+    is a control, and a control that is 100x slower than the methods it controls
+    is a control that quietly does not get run.
+    """
+    G = np.asarray(codes_grid)
+    idx = np.flatnonzero(mask)
+    if len(idx) == 0:
         return []
-    if len(chosen) == 0:
-        return [idx[0]]
     picks = []
+    alive = np.ones(len(idx), bool)
+    if (~mask).any():
+        chosen = G[~mask]
+        d = np.min(np.abs(G[idx][:, None, :] - chosen[None, :, :]).sum(axis=2), axis=1)
+    else:
+        # nothing chosen yet: seed with the first candidate, then the loop below
+        # spreads the rest away from it. Returning early here would hand back a
+        # one-point batch, and a control arm that under-fills its batch is a
+        # control comparing against a smaller budget.
+        d = np.zeros(len(idx))
     for _ in range(min(batch, len(idx))):
-        best, bestd = None, -1
-        for i in idx:
-            d = int((codes_grid[i][None, :] != chosen).sum())
-            if d > bestd:
-                best, bestd = i, d
-        picks.append(best)
-        chosen = np.vstack([chosen, codes_grid[best][None, :]])
-        idx.remove(best)
+        if not alive.any():
+            break
+        d_masked = np.where(alive, d, -np.inf)
+        j = int(np.argmax(d_masked))
+        picks.append(int(idx[j]))
+        alive[j] = False
+        # distance from the new pick, folded into the running min
+        nd = np.abs(G[idx] - G[idx[j]][None, :]).sum(axis=1)
+        d = np.minimum(d, nd)
     return picks
 
 
@@ -56,16 +71,39 @@ def ofat_arm(space, codes_grid, mask, observed, batch, rng):
     for _ in range(min(batch, int(mask.sum()))):
         placed = False
         for j in range(len(space.factors)):
-            scores = []
-            for lv in range(len(space.factors[j].levels)):
-                sel = Xo[:, j] == lv
-                scores.append(float(yo[sel].mean()) if sel.any() else -np.inf)
-            if not np.isfinite(max(scores)):
-                continue
-            cand = cur.copy(); cand[j] = int(np.argmax(scores))
-            flat = int(np.ravel_multi_index(tuple(cand), tuple(space.cardinality)))
-            if mask[flat] and flat not in used:
-                picks.append(flat); used.add(flat); cur = cand; placed = True
+            n = len(space.factors[j].levels)
+            neighbour = cur.copy()
+            # One grid step, not "the level with the best mean anywhere in the
+            # range": for a continuous factor, jumping to a distant level is not
+            # one-factor-at-a-time, it is a scan. A categorical factor has no
+            # neighbour relation, so there the level with the best observed mean
+            # is the only sensible move.
+            if getattr(space.factors[j], "continuous", False):
+                for step in (1, -1):
+                    cand = cur.copy()
+                    lv = int(np.clip(cand[j] + step, 0, n - 1))
+                    if lv == cand[j]:
+                        continue
+                    cand[j] = lv
+                    flat = int(np.ravel_multi_index(tuple(cand), tuple(space.cardinality)))
+                    sel = np.flatnonzero((codes_grid == cand).all(axis=1))
+                    if len(sel) and mask[sel[0]] and sel[0] not in used:
+                        picks.append(int(sel[0])); used.add(int(sel[0]))
+                        cur = cand; placed = True
+                        break
+            else:
+                scores = []
+                for lv in range(n):
+                    sel = Xo[:, j] == lv
+                    scores.append(float(yo[sel].mean()) if sel.any() else -np.inf)
+                if not np.isfinite(max(scores)):
+                    continue
+                cand = cur.copy(); cand[j] = int(np.argmax(scores))
+                sel = np.flatnonzero((codes_grid == cand).all(axis=1))
+                if len(sel) and mask[sel[0]] and sel[0] not in used:
+                    picks.append(int(sel[0])); used.add(int(sel[0]))
+                    cur = cand; placed = True
+            if placed:
                 break
         if not placed:
             rest = [i for i in random_arm(mask, 32, rng) if i not in used]
@@ -76,7 +114,9 @@ def ofat_arm(space, codes_grid, mask, observed, batch, rng):
     return picks
 
 
-def oracle_at_budget(y_grid, mask, budget):
-    """The ceiling: mean of the `budget` best cells that the table contains."""
-    vals = np.sort(y_grid[mask])[::-1]
+def oracle_at_budget(cell_y, budget):
+    """The ceiling: mean of the `budget` best cells the table contains. A
+    campaign can never beat reading the finished table, and printing this keeps
+    the rest honest."""
+    vals = np.sort(np.asarray(cell_y, dtype=float))[::-1]
     return float(vals[:budget].mean()) if len(vals) else float("nan")
