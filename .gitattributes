@@ -1,7 +1,8 @@
-# The dataset is byte-pinned: pspine.data verifies a SHA-256 on every load.
-# Without this, a Windows checkout rewrites LF as CRLF and every clone fails
-# the hash -- which is exactly what CI caught. Data files are never text-normalised.
-pspine/_datasets/** -text -eol
-*.csv -text
-# Everything else may be normalised normally.
+# In .gitattributes the LAST matching pattern wins, so the blanket rule goes
+# first and the exceptions after it.
 * text=auto
+
+# The dataset is byte-pinned: pspine.data verifies a SHA-256 on every load, and
+# a Windows checkout that rewrites LF as CRLF changes the bytes and fails it.
+pspine/_datasets/** -text
+*.csv -text
