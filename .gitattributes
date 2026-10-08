@@ -1,0 +1,7 @@
+# The dataset is byte-pinned: pspine.data verifies a SHA-256 on every load.
+# Without this, a Windows checkout rewrites LF as CRLF and every clone fails
+# the hash -- which is exactly what CI caught. Data files are never text-normalised.
+pspine/_datasets/** -text -eol
+*.csv -text
+# Everything else may be normalised normally.
+* text=auto
