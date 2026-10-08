@@ -47,7 +47,7 @@ def run_one(space, codes, y, arm, seed, budget, batch, init):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.path.join(HERE, "results.json"))
+    ap.add_argument("--out", default=os.path.join(HERE, "results_full.json"))
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--budget", type=int, default=64)
     ap.add_argument("--batch", type=int, default=8)
