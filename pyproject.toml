@@ -9,7 +9,7 @@ description = "Bayesian experimental design on measured process tables -- no sim
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
-authors = [{name = "Yangyi Zhang", url = "https://github.com/ZhangYangyi03"}]
+authors = [{name = "Yangyi Zhang", email = "zhangyangyi03@outlook.com"}]
 keywords = ["bayesian-optimization", "experimental-design", "process-optimization",
             "surrogate-model", "high-throughput-experimentation", "reproducible"]
 classifiers = [
