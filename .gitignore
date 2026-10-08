@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+bench/progress.txt
+bench/campaign.log
+bench/*.log
+bench/ci.json
+bench/pytest.log
+bench/*.bat

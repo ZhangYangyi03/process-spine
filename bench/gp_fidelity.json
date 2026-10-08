@@ -1,0 +1,73 @@
+{
+ "space": "<DesignSpace base(3) x ligand(4) x aryl_halide(16) x additive(24) = 4608 points>",
+ "n_cells": 4599,
+ "sizes": [
+  {
+   "n_train": 16,
+   "spearman_mean": 0.20479100528552677,
+   "pearson_mean": 0.1258223082787375,
+   "rmse_mean": 28.99967120009956,
+   "top10_hit_mean": 0.0,
+   "ls_last": [
+    0.7,
+    0.7,
+    0.7,
+    0.18
+   ]
+  },
+  {
+   "n_train": 32,
+   "spearman_mean": 0.46322054539533813,
+   "pearson_mean": 0.3923553915561409,
+   "rmse_mean": 26.29713378107766,
+   "top10_hit_mean": 0.0,
+   "ls_last": [
+    0.7,
+    0.7,
+    0.7,
+    3.0
+   ]
+  },
+  {
+   "n_train": 64,
+   "spearman_mean": 0.5779442296046557,
+   "pearson_mean": 0.49542034397327245,
+   "rmse_mean": 25.363949150454825,
+   "top10_hit_mean": 0.0,
+   "ls_last": [
+    0.7,
+    3.0,
+    0.7,
+    0.7
+   ]
+  },
+  {
+   "n_train": 128,
+   "spearman_mean": 0.6718861230263641,
+   "pearson_mean": 0.6228661765658697,
+   "rmse_mean": 22.78385534570607,
+   "top10_hit_mean": 0.0,
+   "ls_last": [
+    0.7,
+    0.7,
+    0.7,
+    1.4
+   ]
+  },
+  {
+   "n_train": 256,
+   "spearman_mean": 0.7942235776856149,
+   "pearson_mean": 0.7410313756580423,
+   "rmse_mean": 21.183433490852593,
+   "top10_hit_mean": 0.10000000000000002,
+   "ls_last": [
+    0.7,
+    3.0,
+    0.7,
+    0.7
+   ]
+  }
+ ],
+ "random_top10_hit": 0.002302555836979047,
+ "seconds": 38.1
+}

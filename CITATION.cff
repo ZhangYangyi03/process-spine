@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Zhang
+    given-names: Yangyi
+title: "process-spine: Bayesian experimental design on measured process tables"
+version: 0.1.0
+date-released: 2026-10-08
+license: MIT
+repository-code: "https://github.com/ZhangYangyi03/process-spine"
+abstract: >-
+  A Gaussian-process surrogate and acquisition functions whose every objective
+  evaluation is a row of a published high-throughput experiment table, so no
+  simulator stands between the optimiser and the process. Benchmarked on 4599
+  real amination experiments: expected improvement reaches 0.976 of the table's
+  best within 64 experiments, against 0.939 for random and 0.978 for
+  one-factor-at-a-time.
